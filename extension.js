@@ -1,4 +1,4 @@
-/* DeepSeek Price Clock — GNOME Shell top-bar indicator.
+/* DeepSeek Price Clock: GNOME Shell top-bar indicator.
  *
  * Logic by deepakness (https://github.com/deepakness/deepseek-price-clock,
  * MIT); this file is the GNOME Shell port of his extension.
@@ -106,9 +106,25 @@ export default class DeepSeekPriceClockExtension extends Extension {
         this._windowRows = [];
 
         this._button = new PanelMenu.Button(0.0, 'DeepSeek Price Clock', false);
+        this._light = false;
         this._buildPanel();
         this._buildMenu();
+        this._applyThemeVariant();
         Main.panel.addToStatusArea(this.uuid, this._button, 0, 'right');
+
+        // Follow the shell between dark and light as the user flips it.
+        this._stSettings = St.Settings.get();
+        this._schemeSignals = [
+            this._stSettings.connect('notify::color-scheme',
+                () => this._applyThemeVariant()),
+        ];
+        // `shell-color-scheme` only exists on newer shells, so probe it.
+        try {
+            this._schemeSignals.push(this._stSettings.connect(
+                'notify::shell-color-scheme', () => this._applyThemeVariant()));
+        } catch {
+            // Older GNOME: color-scheme is the only signal that matters.
+        }
 
         this._tick();
         this._timeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 1, () => {
@@ -118,6 +134,13 @@ export default class DeepSeekPriceClockExtension extends Extension {
     }
 
     disable() {
+        if (this._schemeSignals && this._stSettings) {
+            for (const id of this._schemeSignals)
+                this._stSettings.disconnect(id);
+        }
+        this._schemeSignals = null;
+        this._stSettings = null;
+
         if (this._timeoutId) {
             GLib.source_remove(this._timeoutId);
             this._timeoutId = null;
@@ -281,8 +304,8 @@ export default class DeepSeekPriceClockExtension extends Extension {
 
         for (let i = 0; i < SWITCH_MINUTES.length; i++) {
             const row = new St.BoxLayout({x_expand: true, style_class: 'dsc-window-row'});
-            const kind = new St.Label({text: '—', style_class: 'dsc-win-kind'});
-            const range = new St.Label({text: '—', style_class: 'dsc-win-range', x_expand: true});
+            const kind = new St.Label({text: '…', style_class: 'dsc-win-kind'});
+            const range = new St.Label({text: '…', style_class: 'dsc-win-range', x_expand: true});
             const meta = new St.Label({text: '', style_class: 'dsc-win-meta'});
             row.add_child(kind);
             row.add_child(range);
@@ -307,7 +330,7 @@ export default class DeepSeekPriceClockExtension extends Extension {
             row.add_child(new St.Label({text: model.name, style_class: 'dsc-rate-name', x_expand: true}));
             const amounts = [];
             for (let i = 0; i < 3; i++) {
-                const amt = new St.Label({text: '—', style_class: 'dsc-amt'});
+                const amt = new St.Label({text: '…', style_class: 'dsc-amt'});
                 row.add_child(amt);
                 amounts.push(amt);
             }
@@ -337,6 +360,21 @@ export default class DeepSeekPriceClockExtension extends Extension {
         const hours = Math.floor(abs / 60);
         const minutes = abs % 60;
         return `${hours}${minutes ? `:${pad(minutes)}` : ''}`;
+    }
+
+    // Text and panel colors in stylesheet.css are tuned for the dark shell; the
+    // `dsc-light` class swaps in the light palette when the shell is light.
+    _applyThemeVariant() {
+        if (!this._button)
+            return;
+        this._light = Main.getStyleVariant() === 'light';
+        const actors = [this._button, this._button.menu?.actor];
+        for (const actor of actors.filter(a => a)) {
+            actor.remove_style_class_name('dsc-light');
+            if (this._light)
+                actor.add_style_class_name('dsc-light');
+        }
+        this._area?.queue_repaint();
     }
 
     _setZone(zone) {
@@ -446,17 +484,26 @@ export default class DeepSeekPriceClockExtension extends Extension {
         for (const seg of segments) {
             const x = (seg.start / 1440) * width;
             const w = Math.max(1, ((seg.end - seg.start) / 1440) * width);
-            if (seg.kind === 'peak')
-                cr.setSourceRGBA(0.94, 0.36, 0.33, 0.95);
-            else
+            if (seg.kind === 'peak') {
+                if (this._light)
+                    cr.setSourceRGBA(0.77, 0.11, 0.16, 0.95);
+                else
+                    cr.setSourceRGBA(0.94, 0.36, 0.33, 0.95);
+            } else if (this._light) {
+                cr.setSourceRGBA(0.07, 0.50, 0.24, 0.95);
+            } else {
                 cr.setSourceRGBA(0.34, 0.85, 0.55, 0.95);
+            }
             cr.rectangle(x, 1, w, Math.max(1, height - 2));
             cr.fill();
         }
 
         const minute = (now.getUTCHours() * 60 + now.getUTCMinutes() +
             now.getUTCSeconds() / 60 + this._offsetMinutes + 1440) % 1440;
-        cr.setSourceRGBA(1, 1, 1, 0.95);
+        if (this._light)
+            cr.setSourceRGBA(0.1, 0.1, 0.1, 0.9);
+        else
+            cr.setSourceRGBA(1, 1, 1, 0.95);
         cr.rectangle((minute / 1440) * width - 1, 0, 2, height);
         cr.fill();
         cr.$dispose();

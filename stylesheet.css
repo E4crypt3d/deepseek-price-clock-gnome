@@ -1,4 +1,4 @@
-/* DeepSeek Price Clock — top-bar styles. Colors follow the extension's
+/* DeepSeek Price Clock: top-bar styles. Colors follow the extension's
  * green = off-peak, red = peak convention. */
 
 .dsc-panel-label {
@@ -176,4 +176,76 @@
 .dsc-next-rates {
     font-size: 0.78em;
     color: #9a9a9a;
+}
+
+/* Light shell theme: the extension adds `dsc-light` to the panel button and to
+ * the menu's actor, so these override the dark-tuned palette above. */
+.dsc-light .dsc-panel-off {
+    color: #1a7f37;
+}
+
+.dsc-light .dsc-panel-peak {
+    color: #cf222e;
+}
+
+.dsc-light .dsc-title,
+.dsc-light .dsc-badge-text,
+.dsc-light .dsc-win-current {
+    color: #1c1c1c;
+}
+
+.dsc-light .dsc-count {
+    color: #111111;
+}
+
+.dsc-light .dsc-zone,
+.dsc-light .dsc-caption,
+.dsc-light .dsc-until,
+.dsc-light .dsc-win-meta,
+.dsc-light .dsc-next-rates {
+    color: #57606a;
+}
+
+.dsc-light .dsc-tick {
+    color: #6e7781;
+}
+
+.dsc-light .dsc-toggle {
+    background-color: rgba(0, 0, 0, 0.06);
+    color: #24292f;
+}
+
+.dsc-light .dsc-toggle-active {
+    background-color: rgba(26, 127, 55, 0.18);
+    color: #0f2e18;
+}
+
+.dsc-light .dsc-dot {
+    background-color: #2da44e;
+}
+
+.dsc-light .dsc-dot-off {
+    background-color: #2da44e;
+    box-shadow: 0 0 0 3px rgba(45, 164, 78, 0.24);
+}
+
+.dsc-light .dsc-dot-peak {
+    background-color: #d1242f;
+    box-shadow: 0 0 0 3px rgba(209, 36, 47, 0.24);
+}
+
+.dsc-light .dsc-badge-text,
+.dsc-light .dsc-win-kind,
+.dsc-light .dsc-rate-name,
+.dsc-light .dsc-win-range,
+.dsc-light .dsc-amt {
+    color: #24292f;
+}
+
+.dsc-light .dsc-win-peak .dsc-win-kind {
+    color: #cf222e;
+}
+
+.dsc-light .dsc-win-off .dsc-win-kind {
+    color: #1a7f37;
 }

@@ -1,4 +1,4 @@
-# DeepSeek Price Clock — GNOME Shell extension
+# DeepSeek Price Clock: GNOME Shell extension
 
 DeepSeek's API is cheaper when it is off-peak (roughly half price). This puts that
 fact in your top bar: a whale, a countdown to the next price flip, and the current
@@ -11,9 +11,13 @@ state in green (off-peak) or red (peak).
 > released under the same MIT licence with his copyright notice kept in
 > [`LICENSE`](LICENSE).
 
+![Rendered preview of the top-bar indicator and the open menu](docs/preview-dark.png)
+
+*Rendered from `stylesheet.css` for illustration, not a live screenshot.*
+
 ## What it shows
 
-**Top bar** — `🐳 3:12` counting down to the next flip; `12:45` once under an hour.
+**Top bar:** `🐳 3:12` counting down to the next flip; `12:45` once under an hour.
 Green while off-peak, red while peak pricing is active.
 
 **Click it** for:
@@ -26,6 +30,17 @@ Green while off-peak, red while peak pricing is active.
 - an alert switch for notifications when the price flips
 - a link to the upstream price clock
 
+## Light and dark
+
+The extension follows the shell: colors switch automatically when you change
+GNOME's appearance, and live if you flip it while the extension is running.
+The panel keeps a green/red countdown with enough contrast on either theme, and
+the 24-hour timeline and its "now" marker are drawn in the matching palette.
+
+![Rendered preview in the light shell theme](docs/preview-light.png)
+
+*Rendered from `stylesheet.css` for illustration, not a live screenshot.*
+
 ## Install
 
 ```bash
@@ -34,7 +49,7 @@ cd deepseek-price-clock-gnome
 ./install.sh
 ```
 
-Then **log out and back in** — GNOME only scans the extensions directory at login,
+Then **log out and back in**. GNOME only scans the extensions directory at login,
 so a hand-installed extension cannot be hot-loaded. It is already enabled, so it
 appears at the right end of the top bar after the login.
 
@@ -80,6 +95,7 @@ under `org.gnome.shell.extensions.deepseek-price-clock` (`notify`, `timezone`).
 | `stylesheet.css` | menu and panel styling |
 | `schemas/*.gschema.xml` | GSettings schema (`notify`, `timezone`, `last-kind`) |
 | `install.sh` | copies the files into `~/.local/share/gnome-shell/extensions/` |
+| `docs/` | HTML/CSS source of the preview images above |
 
 ## Uninstall
 
@@ -94,7 +110,7 @@ This extension exists because of **[deepakness](https://github.com/deepakness)**
 wrote [deepseek-price-clock](https://github.com/deepakness/deepseek-price-clock) for
 Chrome and Firefox. The peak/off-peak windows, the August 2026 weekday-only rule, the
 holiday handling, the countdown and flip-notification behaviour, and the per-model
-rates in `price.js` were all taken from that project — see it first, and star it.
+rates in `price.js` were all taken from that project. See it first, and star it.
 
 - Original extension and pricing logic: [deepakness/deepseek-price-clock](https://github.com/deepakness/deepseek-price-clock), MIT © 2026 deepakness.
 - GNOME Shell port, menu and timeline rendering: this repository.

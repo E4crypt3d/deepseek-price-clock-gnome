@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DeepSeek Price Clock: rendered preview</title>
+<link rel="stylesheet" href="preview.css">
+</head>
+<body class="dark">
+<script>
+    // Reuse one document for both variants: preview.html#light
+    if (location.hash === '#light')
+        document.body.classList.replace('dark', 'light');
+</script>
+
+<div class="bar">
+    <span class="bar-left">Activities</span>
+    <span class="bar-center">Wed 12:34</span>
+    <div class="bar-right">
+        <span class="indicator peak"><span class="whale">🐳</span><span>2:25</span></span>
+        <span class="sysicons"><span>⌁</span><span class="badge-shape"></span><span>⏻</span></span>
+    </div>
+</div>
+
+<div class="menu">
+    <div class="header-row">
+        <span class="title">DeepSeek Price Clock</span>
+        <span class="toggles">
+            <span class="toggle active">Local</span>
+            <span class="toggle">UTC</span>
+        </span>
+    </div>
+    <div class="zone">Local time · GMT+5</div>
+
+    <div class="hero">
+        <div class="badge">
+            <span class="dot peak"></span>
+            <span class="badge-text">Peak pricing</span>
+        </div>
+        <div class="count">02:25:17 left</div>
+        <div class="until">Off-peak starts 15:00</div>
+    </div>
+
+    <div class="timeline">
+        <div class="track">
+            <span class="seg off" style="left:0%;width:25%"></span>
+            <span class="seg peak" style="left:25%;width:12.5%"></span>
+            <span class="seg off" style="left:37.5%;width:8.333%"></span>
+            <span class="seg peak" style="left:45.833%;width:16.667%"></span>
+            <span class="seg off" style="left:62.5%;width:37.5%"></span>
+            <span class="now" style="left:52.36%"></span>
+        </div>
+        <div class="ticks"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+    </div>
+
+    <div class="windows">
+        <div class="caption">Price windows · your time</div>
+        <div class="win-row current">
+            <span class="win-kind peak">Peak</span>
+            <span class="win-range">11:00 – 15:00</span>
+            <span class="win-meta">2h 25m left</span>
+        </div>
+        <div class="win-row">
+            <span class="win-kind off">Off-peak</span>
+            <span class="win-range">15:00 – Thu 06:00</span>
+            <span class="win-meta">15h</span>
+        </div>
+        <div class="win-row">
+            <span class="win-kind peak">Peak</span>
+            <span class="win-range">Thu 06:00 – 09:00</span>
+            <span class="win-meta">3h</span>
+        </div>
+        <div class="win-row">
+            <span class="win-kind off">Off-peak</span>
+            <span class="win-range">Thu 09:00 – 11:00</span>
+            <span class="win-meta">2h</span>
+        </div>
+    </div>
+
+    <div class="rates">
+        <div class="rates-head">
+            <span class="caption">Paying now · peak</span>
+            <span class="caption">per 1M tokens</span>
+        </div>
+        <div class="rate-row">
+            <span class="rate-name">V4.1 Flash</span>
+            <span class="amt">0.30</span>
+            <span class="amt">0.006</span>
+            <span class="amt">1.20</span>
+        </div>
+        <div class="rate-row">
+            <span class="rate-name">V4 Pro</span>
+            <span class="amt">1.32</span>
+            <span class="amt">0.044</span>
+            <span class="amt">3.96</span>
+        </div>
+        <div class="next-rates">From 15:00 · off-peak: V4.1 Flash 0.15 / 0.003 / 0.60 · V4 Pro 0.66 / 0.022 / 1.98</div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="switch-row">
+        <span>Notify me when the price flips</span>
+        <span class="switch on"><span class="knob"></span></span>
+    </div>
+    <div class="link-row">Full price clock ↗</div>
+</div>
+
+<p class="caption-note">Rendered from stylesheet.css for illustration, not a live screenshot.</p>
+
+</body>
+</html>
