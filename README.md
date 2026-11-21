@@ -1,4 +1,6 @@
-# DeepSeek Price Clock: GNOME Shell extension
+# DeepSeek Price Clock
+
+A GNOME Shell extension and a Windows 11 tray clock for the same pricing rules.
 
 DeepSeek's API is cheaper when it is off-peak (roughly half price). This puts that
 fact in your top bar: a whale, a countdown to the next price flip, and the current
@@ -61,10 +63,26 @@ Then **log out and back in**. GNOME only scans the extensions directory at login
 so a hand-installed extension cannot be hot-loaded. It is already enabled, so it
 appears at the right end of the top bar after the login.
 
-Requirements: GNOME Shell 45–50 with `glib-compile-schemas` and `gnome-extensions`
+Requirements: GNOME Shell 45–51 with `glib-compile-schemas` and `gnome-extensions`
 (part of `glib2`/`gnome-shell`). Tested on Ubuntu with GNOME Shell 50.1 on Wayland.
 
 Update after `git pull`: re-run `./install.sh` and log out and back in again.
+
+## Windows 11
+
+The same clock runs on Windows 11 from the [`windows/`](windows/) folder: a tray
+dot, green off-peak and red peak, with the countdown on hover and the schedule in
+the menu. No installer, no service, no dependencies, just the PowerShell 5.1 that
+ships with Windows. Releases include `deepseek-price-clock-windows.zip`.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\install.ps1 -StartNow
+```
+
+See [`windows/README.md`](windows/README.md) for the details and the test command.
+
+The port's rules match `price.js` exactly: its tests compare 17,520 hourly
+instants over 2026 and 2027 against the JavaScript implementation.
 
 ## Pricing rules implemented
 
@@ -92,8 +110,8 @@ November. Add the dates to `CN_HOLIDAYS` in `price.js`, then re-run `./install.s
 Every push that touches the extension code on `main` runs
 `.github/workflows/release.yml`, which works out the next version from the
 existing `v*` tags, builds the bundle, checks it contains `metadata.json` at the
-root and the compiled schema, then creates the tag and a GitHub release with the
-zip attached. The first release is `v1.0.0`.
+root and the compiled schema, packages the Windows scripts as well, then creates
+the tag and a GitHub release with both zip files attached. The first release is `v1.0.0`.
 
 Manual releases, for a minor or major bump, run the workflow from the Actions
 tab with `bump` (or an exact `version`). Add `[skip release]` to a commit
@@ -131,6 +149,7 @@ under `org.gnome.shell.extensions.deepseek-price-clock` (`notify`, `timezone`).
 | `install.sh` | copies the files into `~/.local/share/gnome-shell/extensions/` |
 | `tests/price.test.mjs` | edge-case tests for the pricing logic (`npm test`) |
 | `docs/` | HTML/CSS source of the preview images above |
+| `windows/` | the Windows 11 tray clock, self-contained, with its own tests |
 
 ## Uninstall
 

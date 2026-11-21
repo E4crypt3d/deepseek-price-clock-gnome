@@ -1,10 +1,11 @@
 name: Release
 
-# Cuts a version tag and a GitHub release with an installable extension bundle.
+# Cuts a version tag and a GitHub release with the GNOME extension bundle and
+# the Windows 11 scripts.
 #
-# Triggered automatically when extension code lands on main, or manually with a
-# chosen bump. The tag is the source of truth for the version; metadata.json no
-# longer carries one (extensions.gnome.org manages it).
+# Triggered automatically when extension or Windows code lands on main, or
+# manually with a chosen bump. The tag is the source of truth for the version;
+# metadata.json no longer carries one (extensions.gnome.org manages it).
 
 on:
   push:
@@ -15,6 +16,7 @@ on:
       - metadata.json
       - stylesheet.css
       - schemas/**
+      - windows/**
       - .github/workflows/release.yml
   workflow_dispatch:
     inputs:
@@ -133,6 +135,27 @@ jobs:
           unzip -Z1 "$bundle" | grep -qx 'install.sh' && { echo "::error::install.sh must not ship in the bundle"; exit 1; }
           echo "Bundle looks good: $uuid"
 
+      - name: Package the Windows clock
+        id: windows
+        run: |
+          set -euo pipefail
+          test -f windows/DeepSeekPriceClock.ps1
+
+          # The folder is meant to be unzipped and run, so it ships whole:
+          # scripts, tests, README and licence, but no editor or log files.
+          rm -f dist/deepseek-price-clock-windows.zip
+          zip -9 -q -r dist/deepseek-price-clock-windows.zip windows \
+            -x '*.log' -x '*/Thumbs.db' -x '*/.*'
+
+          for required in windows/DeepSeekPriceClock.ps1 windows/PriceClock.ps1 \
+                          windows/install.ps1 windows/README.md; do
+            unzip -Z1 dist/deepseek-price-clock-windows.zip | grep -qx "$required" \
+              || { echo "::error::$required missing from the Windows zip"; exit 1; }
+          done
+
+          echo "windows=dist/deepseek-price-clock-windows.zip" >> "$GITHUB_OUTPUT"
+          unzip -l "${{ steps.windows.outputs.windows }}"
+
       - name: Create the tag
         run: |
           set -euo pipefail
@@ -156,6 +179,15 @@ jobs:
             echo
             echo "Or unpack it yourself into \`~/.local/share/gnome-shell/extensions/\`."
             echo
+            echo "**Windows 11:** unzip \`deepseek-price-clock-windows.zip\`, then run"
+            echo
+            echo '```'
+            echo 'powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\install.ps1 -StartNow'
+            echo '```'
+            echo
+            echo "No installer, no admin rights, no dependencies: it uses the PowerShell"
+            echo "already on Windows 11."
+            echo
             echo "Full changelog: https://github.com/${GITHUB_REPOSITORY}/compare/${{ steps.version.outputs.tag }}...HEAD"
           } > "$RUNNER_TEMP/notes.md"
           cat "$RUNNER_TEMP/notes.md"
@@ -166,5 +198,6 @@ jobs:
         run: |
           gh release create "${{ steps.version.outputs.tag }}" \
             "${{ steps.bundle.outputs.bundle }}" \
+            "${{ steps.windows.outputs.windows }}" \
             --title "DeepSeek Price Clock ${{ steps.version.outputs.version }}" \
             --notes-file "$RUNNER_TEMP/notes.md"
