@@ -154,7 +154,7 @@ jobs:
           done
 
           echo "windows=dist/deepseek-price-clock-windows.zip" >> "$GITHUB_OUTPUT"
-          unzip -l "${{ steps.windows.outputs.windows }}"
+          unzip -l dist/deepseek-price-clock-windows.zip
 
       - name: Create the tag
         run: |
