@@ -1,0 +1,9 @@
+{
+  "uuid": "deepseek-price-clock@local",
+  "name": "DeepSeek Price Clock",
+  "description": "Top-bar indicator for DeepSeek API peak/off-peak pricing, with countdown, 24h timeline, price windows and flip notifications. Logic ported from github.com/deepakness/deepseek-price-clock.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "settings-schema": "org.gnome.shell.extensions.deepseek-price-clock",
+  "url": "https://github.com/E4crypt3d/deepseek-price-clock-gnome",
+  "version": 1
+}

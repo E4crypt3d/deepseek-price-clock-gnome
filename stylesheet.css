@@ -1,0 +1,179 @@
+/* DeepSeek Price Clock — top-bar styles. Colors follow the extension's
+ * green = off-peak, red = peak convention. */
+
+.dsc-panel-label {
+    font-feature-settings: "tnum";
+    padding: 0 4px;
+}
+
+.dsc-panel-off {
+    color: #57e389;
+}
+
+.dsc-panel-peak {
+    color: #ff7b72;
+}
+
+.dsc-item {
+    padding: 2px 4px;
+}
+
+.dsc-header-row {
+    spacing: 8px;
+}
+
+.dsc-title {
+    font-weight: bold;
+}
+
+.dsc-zone,
+.dsc-caption {
+    font-size: 0.85em;
+    color: #b0b0b0;
+}
+
+.dsc-toggle-group {
+    spacing: 2px;
+}
+
+.dsc-toggle {
+    font-size: 0.8em;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #d0d0d0;
+}
+
+.dsc-toggle-active {
+    background-color: rgba(87, 227, 137, 0.28);
+    color: #ffffff;
+}
+
+.dsc-hero {
+    spacing: 2px;
+    padding: 4px 0 6px;
+}
+
+.dsc-badge {
+    spacing: 7px;
+    padding: 1px 0 0;
+}
+
+/* Status dot: solid core plus a soft halo ring so the state still reads when
+ * the pixel is small, and stays legible on light and dark shell themes. */
+.dsc-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 5px;
+    background-color: #57e389;
+    margin: 0 3px;
+}
+
+.dsc-dot-off {
+    background-color: #57e389;
+    box-shadow: 0 0 0 3px rgba(87, 227, 137, 0.22);
+}
+
+.dsc-dot-peak {
+    background-color: #ff7b72;
+    box-shadow: 0 0 0 3px rgba(255, 123, 114, 0.22);
+}
+
+.dsc-badge-text {
+    font-weight: bold;
+    color: #e6e6e6;
+}
+
+.dsc-count {
+    font-size: 1.5em;
+    font-weight: bold;
+    font-feature-settings: "tnum";
+    color: #ffffff;
+}
+
+.dsc-until {
+    font-size: 0.9em;
+    color: #b0b0b0;
+}
+
+.dsc-timeline-box {
+    spacing: 3px;
+    padding: 2px 0 6px;
+}
+
+.dsc-track {
+    height: 9px;
+}
+
+.dsc-ticks {
+    spacing: 0;
+}
+
+.dsc-tick {
+    font-size: 0.7em;
+    color: #8a8a8a;
+}
+
+.dsc-windows {
+    spacing: 2px;
+    padding: 2px 0 6px;
+}
+
+.dsc-window-row {
+    spacing: 6px;
+}
+
+.dsc-win-kind {
+    width: 44px;
+    font-size: 0.9em;
+}
+
+.dsc-win-range {
+    font-size: 0.9em;
+    color: #d8d8d8;
+}
+
+.dsc-win-meta {
+    font-size: 0.8em;
+    color: #9a9a9a;
+}
+
+.dsc-win-peak .dsc-win-kind {
+    color: #ff7b72;
+}
+
+.dsc-win-off .dsc-win-kind {
+    color: #57e389;
+}
+
+.dsc-win-current {
+    font-weight: bold;
+}
+
+.dsc-rates {
+    spacing: 2px;
+    padding: 2px 0 4px;
+}
+
+.dsc-rates-head {
+    spacing: 6px;
+}
+
+.dsc-rate-row {
+    spacing: 8px;
+}
+
+.dsc-rate-name {
+    font-size: 0.9em;
+}
+
+.dsc-amt {
+    font-size: 0.9em;
+    font-feature-settings: "tnum";
+    color: #e6e6e6;
+}
+
+.dsc-next-rates {
+    font-size: 0.78em;
+    color: #9a9a9a;
+}
