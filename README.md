@@ -79,6 +79,20 @@ These mirror DeepSeek's billing windows and the upstream extension exactly:
 Each year the State Council publishes the next year's arrangement in early
 November. Add the dates to `CN_HOLIDAYS` in `price.js`, then re-run `./install.sh`.
 
+## Tests
+
+The pricing logic has no GNOME dependencies, so it runs under plain Node:
+
+```bash
+npm test
+```
+
+`tests/price.test.mjs` covers the switch instants to the millisecond, the
+weekend-rule start, every 2027 holiday plus the days around them, the
+`nextSwitch`/`currentWindowStart`/`windowList` invariants the menu relies on,
+and the 24-hour bar across half-hour, negative and beyond-12h UTC offsets, plus
+a year of hourly samples asserting every reported flip is real.
+
 ## Notifications
 
 The extension notifies you when pricing flips, at most once per flip, and only
@@ -95,6 +109,7 @@ under `org.gnome.shell.extensions.deepseek-price-clock` (`notify`, `timezone`).
 | `stylesheet.css` | menu and panel styling |
 | `schemas/*.gschema.xml` | GSettings schema (`notify`, `timezone`, `last-kind`) |
 | `install.sh` | copies the files into `~/.local/share/gnome-shell/extensions/` |
+| `tests/price.test.mjs` | edge-case tests for the pricing logic (`npm test`) |
 | `docs/` | HTML/CSS source of the preview images above |
 
 ## Uninstall

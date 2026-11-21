@@ -157,9 +157,15 @@ export function windowList(now, count) {
 
 // Rebuild the 24-hour day bar in display time (offsetMinutes ahead of UTC).
 export function displaySegments(now, offsetMinutes) {
-    const dayStart = offsetMinutes === 0
-        ? Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-        : Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - offsetMinutes * 60000;
+    // Midnight of the day being displayed, worked out from the requested
+    // offset rather than the host time zone, so the bar is correct for any
+    // offset the caller passes.
+    const shifted = new Date(now.getTime() + offsetMinutes * 60000);
+    const dayStart = Date.UTC(
+        shifted.getUTCFullYear(),
+        shifted.getUTCMonth(),
+        shifted.getUTCDate()
+    ) - offsetMinutes * 60000;
     const boundaries = [0, 1440];
     for (const m of SWITCH_MINUTES)
         boundaries.push(((m + offsetMinutes) % 1440 + 1440) % 1440);
