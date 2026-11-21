@@ -2,7 +2,7 @@
 # Install/refresh the DeepSeek Price Clock GNOME extension for the current user.
 set -euo pipefail
 
-UUID="deepseek-price-clock@local"
+UUID="deepseek-price-clock@e4crypt3d.github.io"
 SRC="$(cd "$(dirname "$0")" && pwd)"
 DEST="${HOME}/.local/share/gnome-shell/extensions/${UUID}"
 
@@ -20,7 +20,7 @@ cat <<'EOF'
 Installed. If this is the first install, log out and back in (Wayland cannot
 reload the shell), then run:
 
-  gnome-extensions enable deepseek-price-clock@local
+  gnome-extensions enable deepseek-price-clock@e4crypt3d.github.io
 
 Already installed before? Log out and back in to pick up the changes, or on
 X11 press Alt+F2, type "r" and hit Enter.

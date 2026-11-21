@@ -1,0 +1,170 @@
+name: Release
+
+# Cuts a version tag and a GitHub release with an installable extension bundle.
+#
+# Triggered automatically when extension code lands on main, or manually with a
+# chosen bump. The tag is the source of truth for the version; metadata.json no
+# longer carries one (extensions.gnome.org manages it).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - extension.js
+      - price.js
+      - metadata.json
+      - stylesheet.css
+      - schemas/**
+      - .github/workflows/release.yml
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: Exact version to release, overrides bump (e.g. 1.2.0)
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Tag and release
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      !contains(github.event.head_commit.message, '[skip release]')
+    steps:
+      - name: Check out the full history and tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libglib2.0-bin zip jq
+
+      - name: Work out the next version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump || 'patch' }}
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force --quiet
+          latest="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+
+          if [ -n "${REQUESTED:-}" ]; then
+            next="${REQUESTED#v}"
+          elif [ -z "$latest" ]; then
+            # No release yet: start the series rather than at 0.0.1.
+            next="1.0.0"
+          else
+            echo "Latest tag: $latest"
+            IFS=. read -r major minor patch <<< "${latest#v}"
+            case "$BUMP" in
+              major) major=$((major + 1)); minor=0; patch=0 ;;
+              minor) minor=$((minor + 1)); patch=0 ;;
+              *)     patch=$((patch + 1)) ;;
+            esac
+            next="${major}.${minor}.${patch}"
+          fi
+
+          if ! [[ "$next" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$next' is not a valid version (expected X.Y.Z)"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v${next}" >/dev/null; then
+            echo "::error::Tag v${next} already exists"
+            exit 1
+          fi
+
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "tag=v${next}" >> "$GITHUB_OUTPUT"
+
+      - name: Build the extension bundle
+        id: bundle
+        run: |
+          set -euo pipefail
+          uuid="$(jq -r .uuid metadata.json)"
+          [ -n "$uuid" ] && [ "$uuid" != "null" ] || { echo "::error::metadata.json has no uuid"; exit 1; }
+
+          # Ship exactly what GNOME Shell needs, and nothing else: no tests, no
+          # docs, no build or install scripts. The compiled schema has to be in
+          # the bundle, having just rebuilt it from the XML.
+          glib-compile-schemas schemas
+          rm -rf build && mkdir -p build/schemas
+          cp metadata.json extension.js price.js stylesheet.css LICENSE build/
+          cp schemas/*.gschema.xml schemas/gschemas.compiled build/schemas/
+
+          mkdir -p dist
+          (cd build && zip -9 -q -r "../dist/${uuid}.shell-extension.zip" .)
+
+          echo "bundle=dist/${uuid}.shell-extension.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Check the bundle before publishing it
+        run: |
+          set -euo pipefail
+          bundle="${{ steps.bundle.outputs.bundle }}"
+          echo "Bundle: $bundle"
+          unzip -l "$bundle"
+
+          for required in metadata.json extension.js price.js stylesheet.css LICENSE \
+                          schemas/gschemas.compiled; do
+            unzip -Z1 "$bundle" | grep -qx "$required" || { echo "::error::$required missing from bundle"; exit 1; }
+          done
+
+          # The metadata must sit at the root and the UUID must be a namespace
+          # the extension site accepts (id@domain), not the placeholder @local.
+          uuid="$(unzip -p "$bundle" metadata.json | jq -r .uuid)"
+          case "$uuid" in
+            *@*.*) ;;
+            *) echo "::error::uuid '$uuid' is not of the form id@domain"; exit 1 ;;
+          esac
+          unzip -Z1 "$bundle" | grep -qx 'install.sh' && { echo "::error::install.sh must not ship in the bundle"; exit 1; }
+          echo "Bundle looks good: $uuid"
+
+      - name: Create the tag
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "DeepSeek Price Clock ${{ steps.version.outputs.version }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Write the release notes
+        run: |
+          set -euo pipefail
+          asset="$(basename "${{ steps.bundle.outputs.bundle }}")"
+          {
+            echo "Install with:"
+            echo
+            echo '```'
+            echo "gnome-extensions install --force ${asset}"
+            echo '```'
+            echo
+            echo "Then log out and back in, and enable **DeepSeek Price Clock** in the Extensions app."
+            echo
+            echo "Or unpack it yourself into \`~/.local/share/gnome-shell/extensions/\`."
+            echo
+            echo "Full changelog: https://github.com/${GITHUB_REPOSITORY}/compare/${{ steps.version.outputs.tag }}...HEAD"
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            "${{ steps.bundle.outputs.bundle }}" \
+            --title "DeepSeek Price Clock ${{ steps.version.outputs.version }}" \
+            --notes-file "$RUNNER_TEMP/notes.md"

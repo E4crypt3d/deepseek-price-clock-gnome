@@ -43,6 +43,14 @@ the 24-hour timeline and its "now" marker are drawn in the matching palette.
 
 ## Install
 
+From a release bundle, no clone needed:
+
+```bash
+gnome-extensions install --force deepseek-price-clock@e4crypt3d.github.io.shell-extension.zip
+```
+
+Or from source:
+
 ```bash
 git clone https://github.com/E4crypt3d/deepseek-price-clock-gnome.git
 cd deepseek-price-clock-gnome
@@ -78,6 +86,18 @@ These mirror DeepSeek's billing windows and the upstream extension exactly:
 
 Each year the State Council publishes the next year's arrangement in early
 November. Add the dates to `CN_HOLIDAYS` in `price.js`, then re-run `./install.sh`.
+
+## Releases
+
+Every push that touches the extension code on `main` runs
+`.github/workflows/release.yml`, which works out the next version from the
+existing `v*` tags, builds the bundle, checks it contains `metadata.json` at the
+root and the compiled schema, then creates the tag and a GitHub release with the
+zip attached. The first release is `v1.0.0`.
+
+Manual releases, for a minor or major bump, run the workflow from the Actions
+tab with `bump` (or an exact `version`). Add `[skip release]` to a commit
+message to land code without cutting a release.
 
 ## Tests
 
@@ -115,8 +135,8 @@ under `org.gnome.shell.extensions.deepseek-price-clock` (`notify`, `timezone`).
 ## Uninstall
 
 ```bash
-gnome-extensions disable deepseek-price-clock@local
-rm -rf ~/.local/share/gnome-shell/extensions/deepseek-price-clock@local
+gnome-extensions disable deepseek-price-clock@e4crypt3d.github.io
+rm -rf ~/.local/share/gnome-shell/extensions/deepseek-price-clock@e4crypt3d.github.io
 ```
 
 ## Credits
