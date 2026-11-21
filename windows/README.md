@@ -23,7 +23,8 @@ toasts in the Action Center.
 
 ## Install
 
-From a release zip, run the native clock:
+Download `DeepSeekPriceClock.exe` straight from the release page, or take the
+release zip (which also carries the PowerShell build and the tests) and run:
 
 ```powershell
 .\windows\DeepSeekPriceClock.exe

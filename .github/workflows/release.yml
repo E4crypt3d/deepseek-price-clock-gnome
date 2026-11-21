@@ -91,6 +91,7 @@ jobs:
       # The tray clock is a small native Rust binary; cross-compiling it here
       # gives the release a real .exe without a second job or runner.
       - name: Build the native Windows clock
+        id: native
         run: |
           set -euo pipefail
           rustup target add x86_64-pc-windows-gnu
@@ -101,6 +102,7 @@ jobs:
           install -m 0755 \
             target/windows-rust/x86_64-pc-windows-gnu/release/deepseek-price-clock.exe \
             windows/DeepSeekPriceClock.exe
+          echo "exe=windows/DeepSeekPriceClock.exe" >> "$GITHUB_OUTPUT"
           ls -lh windows/DeepSeekPriceClock.exe
 
       - name: Work out the next version
@@ -236,7 +238,10 @@ jobs:
             echo '.\windows\DeepSeekPriceClock.exe'
             echo '```'
             echo
-            echo "or the PowerShell build:"
+            echo "The tray app is also attached to this release on its own as"
+            echo "\`DeepSeekPriceClock.exe\`, if you only want the single file."
+            echo
+            echo "Or use the PowerShell build:"
             echo
             echo '```'
             echo 'powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\install.ps1 -StartNow'
@@ -252,8 +257,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          test -f "${{ steps.native.outputs.exe }}"
           gh release create "${{ steps.version.outputs.tag }}" \
             "${{ steps.bundle.outputs.bundle }}" \
             "${{ steps.windows.outputs.windows }}" \
+            "${{ steps.native.outputs.exe }}" \
             --title "DeepSeek Price Clock ${{ steps.version.outputs.version }}" \
             --notes-file "$RUNNER_TEMP/notes.md"

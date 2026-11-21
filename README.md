@@ -72,12 +72,13 @@ Update after `git pull`: re-run `./install.sh` and log out and back in again.
 
 The same clock runs on Windows 11 from the [`windows/`](windows/) folder: a tray
 dot, green off-peak and red peak, with the countdown on hover and the schedule in
-the menu. No installer, no service, no dependencies. Releases include a native
-`.exe` and the PowerShell 5.1 build, both in `deepseek-price-clock-windows.zip`.
+the menu. No installer, no service, no dependencies. Each release attaches the
+native `DeepSeekPriceClock.exe` on its own, and also ships it alongside the
+PowerShell 5.1 build in `deepseek-price-clock-windows.zip`.
 
 ```powershell
-.\windows\DeepSeekPriceClock.exe
-# or, without the native build:
+.\DeepSeekPriceClock.exe
+# or, from the zip and without the native build:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\install.ps1 -StartNow
 ```
 
