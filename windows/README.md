@@ -4,9 +4,10 @@ The Windows 11 side of [deepseek-price-clock-gnome](https://github.com/E4crypt3d
 a tray icon that shows whether DeepSeek's API is billing at peak or off-peak
 rates, how long is left in the current window, and when the next switches are.
 
-No installer, no admin rights, no dependencies, no background service. It is one
-PowerShell script using the PowerShell 5.1 and .NET Framework that ship with
-Windows 11.
+No installer, no admin rights, no dependencies, no background service. It ships
+two ways: `DeepSeekPriceClock.exe`, a small native binary in `rust/`, and the
+original PowerShell script that runs on the PowerShell 5.1 and .NET Framework
+that ship with Windows 11. Both show the same dot and read the same rules.
 
 The dot is green when off-peak, red when peak. Hover it for the countdown, click
 it for the full schedule and rates.
@@ -22,7 +23,19 @@ toasts in the Action Center.
 
 ## Install
 
-From a release zip, or from the repo:
+From a release zip, run the native clock:
+
+```powershell
+.\windows\DeepSeekPriceClock.exe
+```
+
+That is the whole install. Use **Start with Windows** in its menu to have it come
+back at login (a per-user `Run` value, no admin rights), and **Exit** to stop it.
+The indicator re-adds itself if Explorer restarts, so it does not disappear for
+the rest of the session. Both builds take the same single-instance lock, so at
+login only one dot appears even if both autostarts were set, but pick one anyway.
+
+Or use the PowerShell version, from a release zip or from the repo:
 
 ```powershell
 # release zip: unpacks to a windows\ folder
@@ -88,24 +101,43 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\PriceClock.Tests.ps1
 
 42 checks, no Pester needed: known instants either side of every boundary, the
 weekend rule start, holiday stretches, window starts, the window list, countdown
-formatting, plus a two year hourly invariant sweep. The logic is also verified
-against the JavaScript implementation used by the GNOME extension for 17,520
-hourly instants over 2026 and 2027, with identical results.
+formatting, plus a two year hourly invariant sweep.
+
+The native build has its own tests. They share the pricing module with the app and
+run on any platform, no Windows needed. The rules are compared against the
+JavaScript implementation used by the GNOME extension for 17,520 hourly instants
+over 2026 and 2027, with identical results.
+
+```bash
+cargo test --manifest-path windows/rust/Cargo.toml --lib
+cargo build --release --target x86_64-pc-windows-gnu \
+  --manifest-path windows/rust/Cargo.toml
+```
+
+The release workflow runs these Rust tests and the PowerShell suite on a Windows
+runner, and the GNOME tests on Linux, before it builds the `.exe` into the Windows
+zip.
 
 ## Files
 
 | File | What it is |
 | --- | --- |
-| `DeepSeekPriceClock.ps1` | The tray app: icon, menu, timer, notifications |
+| `DeepSeekPriceClock.exe` | The native tray app, built from `rust/` (in the release zip) |
+| `DeepSeekPriceClock.ps1` | The PowerShell tray app: icon, menu, timer, notifications |
 | `PriceClock.ps1` | Pricing rules and the autostart helpers, no UI |
 | `install.ps1` | Adds or removes the Startup shortcut |
 | `tests/PriceClock.Tests.ps1` | Logic tests |
+| `rust/` | The native source: `pricing.rs` rules, `main.rs` Win32 tray |
 
 ## Notes
 
-- The dot is drawn in code, so the repo has no image assets.
+- Windows 11 puts new tray icons in the overflow chevron until you drag the dot
+  onto the taskbar; after that it stays visible.
+- The dot is drawn in code in both builds, so the repo has no image assets.
 - The timer fires every 20 seconds, which is enough to keep a minute countdown
   accurate and to catch a switch promptly. It does nothing in between.
+- The native build is one hidden window, one timer and two icons drawn once;
+  the menu is built only while it is open and destroyed when it closes.
 - Nothing leaves your machine and nothing is fetched from the network apart
   from the pricing page if you click it.
 

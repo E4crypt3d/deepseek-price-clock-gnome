@@ -1,0 +1,31 @@
+[package]
+name = "deepseek-price-clock"
+version = "1.1.0"
+edition = "2021"
+description = "Tray clock for DeepSeek API peak and off-peak pricing"
+license = "MIT"
+repository = "https://github.com/E4crypt3d/deepseek-price-clock-gnome"
+
+[[bin]]
+name = "deepseek-price-clock"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_System_Time",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

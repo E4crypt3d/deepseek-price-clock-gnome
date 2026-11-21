@@ -1,7 +1,11 @@
 name: Release
 
 # Cuts a version tag and a GitHub release with the GNOME extension bundle and
-# the Windows 11 scripts.
+# the Windows 11 clock (native exe and PowerShell scripts).
+#
+# Runs each platform's tests on its own runner first: the GNOME extension on
+# Ubuntu, the Windows clock on Windows. A release is only tagged when both
+# suites pass.
 #
 # Triggered automatically when extension or Windows code lands on main, or
 # manually with a chosen bump. The tag is the source of truth for the version;
@@ -38,8 +42,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test-linux:
+    name: Tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      # The GNOME extension's pricing logic has no shell dependencies, so plain
+      # Node runs the whole suite.
+      - name: GNOME extension pricing tests
+        run: npm test
+
+  test-windows:
+    name: Tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      # The documented shell for this script is the PowerShell 5.1 that ships
+      # with Windows, not PowerShell 7. The suite exits with the failure count.
+      - name: Windows price clock tests
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\tests\PriceClock.Tests.ps1
+
+      - name: Windows tray pricing tests
+        run: cargo test --locked --manifest-path windows/rust/Cargo.toml --lib
+
   release:
     name: Tag and release
+    needs: [test-linux, test-windows]
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -53,7 +86,22 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libglib2.0-bin zip jq
+          sudo apt-get install -y -qq libglib2.0-bin zip jq gcc-mingw-w64-x86-64
+
+      # The tray clock is a small native Rust binary; cross-compiling it here
+      # gives the release a real .exe without a second job or runner.
+      - name: Build the native Windows clock
+        run: |
+          set -euo pipefail
+          rustup target add x86_64-pc-windows-gnu
+          cargo build --release --locked \
+            --manifest-path windows/rust/Cargo.toml \
+            --target x86_64-pc-windows-gnu \
+            --target-dir target/windows-rust
+          install -m 0755 \
+            target/windows-rust/x86_64-pc-windows-gnu/release/deepseek-price-clock.exe \
+            windows/DeepSeekPriceClock.exe
+          ls -lh windows/DeepSeekPriceClock.exe
 
       - name: Work out the next version
         id: version
@@ -140,15 +188,18 @@ jobs:
         run: |
           set -euo pipefail
           test -f windows/DeepSeekPriceClock.ps1
+          test -f windows/DeepSeekPriceClock.exe
 
           # The folder is meant to be unzipped and run, so it ships whole:
-          # scripts, tests, README and licence, but no editor or log files.
+          # the native exe, scripts, tests, README and licence, but no build
+          # output, editor or log files.
+
           rm -f dist/deepseek-price-clock-windows.zip
           zip -9 -q -r dist/deepseek-price-clock-windows.zip windows \
-            -x '*.log' -x '*/Thumbs.db' -x '*/.*'
+            -x '*.log' -x '*/Thumbs.db' -x '*/.*' -x 'windows/rust/target/*'
 
-          for required in windows/DeepSeekPriceClock.ps1 windows/PriceClock.ps1 \
-                          windows/install.ps1 windows/README.md; do
+          for required in windows/DeepSeekPriceClock.exe windows/DeepSeekPriceClock.ps1 \
+                          windows/PriceClock.ps1 windows/install.ps1 windows/README.md; do
             unzip -Z1 dist/deepseek-price-clock-windows.zip | grep -qx "$required" \
               || { echo "::error::$required missing from the Windows zip"; exit 1; }
           done
@@ -182,11 +233,16 @@ jobs:
             echo "**Windows 11:** unzip \`deepseek-price-clock-windows.zip\`, then run"
             echo
             echo '```'
+            echo '.\windows\DeepSeekPriceClock.exe'
+            echo '```'
+            echo
+            echo "or the PowerShell build:"
+            echo
+            echo '```'
             echo 'powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\install.ps1 -StartNow'
             echo '```'
             echo
-            echo "No installer, no admin rights, no dependencies: it uses the PowerShell"
-            echo "already on Windows 11."
+            echo "No installer, no admin rights, no dependencies."
             echo
             echo "Full changelog: https://github.com/${GITHUB_REPOSITORY}/compare/${{ steps.version.outputs.tag }}...HEAD"
           } > "$RUNNER_TEMP/notes.md"
