@@ -1,15 +1,14 @@
 //! Windows 11 tray clock for DeepSeek peak/off-peak pricing.
 //!
-//! The native counterpart of `windows/DeepSeekPriceClock.ps1`: the same dot,
-//! countdown, menu and switch notifications, without PowerShell. The pricing
-//! rules are shared with the GNOME extension through
-//! [`deepseek_price_clock::pricing`].
+//! The tray dot opens a card that mirrors the GNOME Shell extension's menu:
+//! status dot, live countdown, the 24-hour timeline, the next price windows and
+//! the current rates, in the Windows light or dark app theme. The card is
+//! drawn by [`paint`], not assembled from Win32 menu items, which is what makes
+//! the two builds look like the same app.
 //!
-//! It is deliberately small: one hidden window, one 20 second timer, two icons
-//! drawn once at startup, and a popup menu built only while it is open. Nothing
-//! is allocated on the timer path except a short tooltip string, and every GDI
-//! object is either cached for the life of the process or destroyed as soon as
-//! it is not needed.
+//! It is still small: one hidden window, one tray icon, and a card that only
+//! exists while it is open. The pricing rules live in
+//! [`deepseek_price_clock::pricing`] and are shared with the GNOME extension.
 //!
 //! Build it from any platform:
 //!
@@ -33,6 +32,9 @@ fn main() {
 }
 
 #[cfg(windows)]
+mod paint;
+
+#[cfg(windows)]
 mod win {
     use std::cell::UnsafeCell;
     use std::ffi::c_void;
@@ -43,32 +45,41 @@ mod win {
 
     use deepseek_price_clock::pricing::{self, Kind};
 
+    use crate::paint::{self, Action, Card, Model, RateRow, WindowRow, Zone};
+
     use windows_sys::Win32::Foundation::{
-        CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, HWND, LPARAM, LRESULT, POINT,
-        SYSTEMTIME, WPARAM,
+        CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, HWND, LPARAM, LRESULT,
+        POINT, RECT, SYSTEMTIME, WPARAM,
     };
     use windows_sys::Win32::Graphics::Gdi::{
-        CreateBitmap, CreateDIBSection, DeleteObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP,
-        RGBQUAD,
+        CreateBitmap, CreateDIBSection, DeleteObject, GetDC, GetMonitorInfoW, MonitorFromPoint,
+        ReleaseDC, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HDC, MONITORINFO,
+        MONITOR_DEFAULTTONEAREST, RGBQUAD,
     };
     use windows_sys::Win32::System::LibraryLoader::{GetModuleFileNameW, GetModuleHandleW};
     use windows_sys::Win32::System::Registry::{
-        RegCloseKey, RegDeleteValueW, RegGetValueW, RegOpenKeyExW, RegSetValueExW, HKEY_CURRENT_USER, KEY_SET_VALUE,
-        REG_SZ, RRF_RT_REG_SZ,
+        RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegGetValueW, RegOpenKeyExW, RegSetValueExW,
+        HKEY_CURRENT_USER, KEY_SET_VALUE, REG_DWORD, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
     };
     use windows_sys::Win32::System::Threading::CreateMutexW;
     use windows_sys::Win32::System::Time::SystemTimeToTzSpecificLocalTime;
+    use windows_sys::Win32::UI::HiDpi::{
+        GetDpiForMonitor, GetDpiForSystem, SetProcessDpiAwarenessContext,
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI,
+    };
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TRACKMOUSEEVENT};
     use windows_sys::Win32::UI::Shell::{
-        Shell_NotifyIconW, ShellExecuteW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD, NIM_DELETE,
-        NIM_MODIFY, NOTIFYICONDATAW,
+        ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO,
+        NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        AppendMenuW, CreateIconIndirect, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
-        DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, KillTimer, PostMessageW, PostQuitMessage,
-        RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, SetTimer, TrackPopupMenu, TranslateMessage,
-        HICON, HMENU, ICONINFO, MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MSG, TPM_LEFTALIGN,
-        TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_LBUTTONUP,
-        WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
+        CreateIconIndirect, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow,
+        DispatchMessageW, GetCursorPos, GetMessageW, KillTimer, LoadCursorW, PostQuitMessage,
+        RegisterClassW, RegisterWindowMessageW, SetCursor, SetForegroundWindow, SetTimer,
+        ShowWindow, TranslateMessage, UpdateLayeredWindow, HICON, ICONINFO, IDC_ARROW, IDC_HAND,
+        MSG, SW_SHOWNA, WM_ACTIVATE, WM_APP, WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_KEYDOWN,
+        WM_LBUTTONUP, WM_MOUSEMOVE, WM_RBUTTONUP, WM_SETTINGCHANGE, WM_TIMER, WNDCLASSW,
+        WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
     };
 
     const APP_NAME: &str = "DeepSeek Price Clock";
@@ -76,41 +87,46 @@ mod win {
     const MUTEX_NAME: &str = "Local\\DeepSeekPriceClock";
     const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
     const RUN_VALUE: &str = "DeepSeekPriceClock";
+    const SETTINGS_KEY: &str = "Software\\DeepSeekPriceClock";
+    const THEME_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
     const PRICING_URL: &str = "https://api-docs.deepseek.com/quick_start/pricing";
     const TASKBAR_CREATED_MESSAGE: &str = "TaskbarCreated";
 
     const TRAY_ICON_ID: u32 = 1;
     const TRAY_MESSAGE: u32 = WM_APP + 1;
-    const TIMER_ID: usize = 1;
-    /// 20 s keeps the minute countdown honest and catches a flip promptly
-    /// without doing any work in between, same as the PowerShell app.
+    const TIMER_REFRESH: usize = 1;
+    const TIMER_POPUP: usize = 2;
+    /// The tooltip and the dot only need a minute's worth of accuracy; the card
+    /// has its own one second timer while it is open.
     const REFRESH_MS: u32 = 20_000;
+    const POPUP_MS: u32 = 1_000;
 
-    const MENU_PRICING: u32 = 1001;
-    const MENU_AUTOSTART: u32 = 1002;
-    const MENU_NOTIFY: u32 = 1003;
-    const MENU_EXIT: u32 = 1004;
+    /// `WM_MOUSELEAVE`, which windows-sys only exports from the controls module.
+    const WM_MOUSELEAVE: u32 = 0x02A3;
+    /// `WM_THEMECHANGED`.
+    const WM_THEMECHANGED: u32 = 0x031A;
+    const VK_ESCAPE: usize = 0x1B;
 
-    // The same dot colours as the tray script and the GNOME extension.
+    /// Same dot colours as the GNOME extension: green off-peak, red peak.
     const OFF_RGB: (u8, u8, u8) = (87, 227, 137);
     const PEAK_RGB: (u8, u8, u8) = (255, 123, 114);
 
     /// Rates per 1M tokens (input cache hit, input cache miss, output), from the
     /// upstream extension's table and `price.js`.
-    const MODELS: &[Model] = &[
-        Model {
+    const MODELS: &[ModelRate] = &[
+        ModelRate {
             name: "V4.1 Flash",
             off: ["$0.15", "$0.003", "$0.60"],
             peak: ["$0.30", "$0.006", "$1.20"],
         },
-        Model {
+        ModelRate {
             name: "V4 Pro",
             off: ["$0.66", "$0.022", "$1.98"],
             peak: ["$1.32", "$0.044", "$3.96"],
         },
     ];
 
-    struct Model {
+    struct ModelRate {
         name: &'static str,
         off: [&'static str; 3],
         peak: [&'static str; 3],
@@ -122,7 +138,7 @@ mod win {
     static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 
     /// The app lives for the whole message loop, so the window procedure needs a
-    /// stable place to find it. Windows and the menu run on this one thread.
+    /// stable place to find it. Windows and the card run on this one thread.
     struct AppCell(UnsafeCell<Option<App>>);
     // SAFETY: only touched from the thread that created the window.
     unsafe impl Sync for AppCell {}
@@ -142,7 +158,16 @@ mod win {
         peak_icon: HICON,
         last_kind: Option<Kind>,
         notify: bool,
+        zone: Zone,
+        dark: bool,
         icon_added: bool,
+        shown: bool,
+        hover: Option<Action>,
+        hits: Vec<(Action, RECT)>,
+        /// Screen position of the card's visible top-left, kept while it is
+        /// open so a repaint never makes it jump under the mouse.
+        origin: (i32, i32),
+        hidden_at_ms: i64,
         exe: String,
     }
 
@@ -159,8 +184,18 @@ mod win {
                 off_icon: draw_dot(OFF_RGB),
                 peak_icon: draw_dot(PEAK_RGB),
                 last_kind: None,
-                notify: true,
+                notify: read_dword("Notify").map(|v| v != 0).unwrap_or(true),
+                zone: match read_dword("Zone") {
+                    Some(1) => Zone::Utc,
+                    _ => Zone::Local,
+                },
+                dark: system_is_dark(),
                 icon_added: false,
+                shown: false,
+                hover: None,
+                hits: Vec::new(),
+                origin: (0, 0),
+                hidden_at_ms: 0,
                 exe: current_exe(),
             }
         }
@@ -173,10 +208,9 @@ mod win {
             }
         }
 
-        /// Paint the current state, adding the dot if the shell does not have
-        /// it. Called every tick, so a lost or rejected icon is put back within
-        /// 20 s instead of staying gone for the session.
-        fn refresh(&mut self) {
+        /// Paint the tray dot and tooltip. Called every 20 s and after a theme
+        /// switch, so a lost icon is put back within one tick.
+        fn refresh_tray(&mut self) {
             let now = now_secs();
             let kind = pricing::kind_at(now);
             let next = pricing::next_switch(now);
@@ -184,7 +218,10 @@ mod win {
 
             self.nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
             self.nid.hIcon = self.icon_for(kind);
-            self.nid.szTip = fixed_text(&format!("DeepSeek {}, {left} left", kind.label().to_lowercase()));
+            self.nid.szTip = fixed_text(&format!(
+                "DeepSeek {} · {left} left",
+                kind.label().to_lowercase()
+            ));
 
             if self.icon_added {
                 self.icon_added = unsafe { Shell_NotifyIconW(NIM_MODIFY, &self.nid) != 0 };
@@ -204,12 +241,12 @@ mod win {
         fn notify_switch(&mut self, kind: Kind) {
             let model = &MODELS[0];
             let (title, rates) = if kind.is_peak() {
-                ("Peak pricing started", &model.peak)
+                ("DeepSeek: peak pricing started", &model.peak)
             } else {
-                ("Off-peak pricing started", &model.off)
+                ("DeepSeek: off-peak started (half price)", &model.off)
             };
             let body = format!(
-                "DeepSeek {} is now {} in, {} out per 1M tokens.",
+                "{} is now {} in, {} out per 1M tokens.",
                 model.name, rates[0], rates[2]
             );
 
@@ -222,75 +259,141 @@ mod win {
             }
         }
 
-        /// Build a fresh menu with current times. The caller owns and destroys it.
-        fn build_menu(&mut self) -> HMENU {
-            let now = now_secs();
-            let kind = pricing::kind_at(now);
-            let next = pricing::next_switch(now);
-            let left = pricing::format_countdown(next.time - now);
+        /// Render and show the card. `keep_origin` is used for the one second
+        /// tick and hover repaints so the panel does not follow the pointer.
+        fn show_popup(&mut self, keep_origin: bool) -> bool {
+            let model = build_model(
+                now_secs(),
+                self.zone,
+                self.dark,
+                self.hover,
+                self.notify,
+                autostart_enabled(),
+            );
+            let scale = dpi_scale_at_cursor();
+            let Some(card) = paint::render(&model, scale) else {
+                return false;
+            };
 
+            if !keep_origin || !self.shown {
+                let (x, y) = place_card(&card);
+                self.origin = (x, y);
+            }
+
+            let (x, y) = self.origin;
             unsafe {
-                let menu = CreatePopupMenu();
-
-                add_info(menu, kind.label());
-                add_info(
-                    menu,
-                    &format!(
-                        "{} until {}, {} from now",
-                        kind.label(),
-                        local_hhmm(next.time),
-                        left
-                    ),
+                let screen: HDC = GetDC(null_mut());
+                if screen.is_null() {
+                    card.destroy();
+                    return false;
+                }
+                let destination = POINT {
+                    x: x - card.offset_x,
+                    y: y - card.offset_y,
+                };
+                let size = windows_sys::Win32::Foundation::SIZE {
+                    cx: card.width,
+                    cy: card.height,
+                };
+                let source = POINT { x: 0, y: 0 };
+                let blend = windows_sys::Win32::Graphics::Gdi::BLENDFUNCTION {
+                    BlendOp: windows_sys::Win32::Graphics::Gdi::AC_SRC_OVER as u8,
+                    BlendFlags: 0,
+                    SourceConstantAlpha: 255,
+                    AlphaFormat: windows_sys::Win32::Graphics::Gdi::AC_SRC_ALPHA as u8,
+                };
+                UpdateLayeredWindow(
+                    self.hwnd,
+                    screen,
+                    &destination,
+                    &size,
+                    card.hdc,
+                    &source,
+                    0,
+                    &blend,
+                    windows_sys::Win32::UI::WindowsAndMessaging::ULW_ALPHA,
                 );
-                AppendMenuW(menu, MF_SEPARATOR, 0, null());
+                ReleaseDC(null_mut(), screen);
+            }
 
-                let switches = CreatePopupMenu();
-                for switch in pricing::next_switches(now, 4) {
-                    add_info(
-                        switches,
-                        &format!(
-                            "{} {}, in {}",
-                            local_hhmm(switch.time),
-                            switch.kind.label().to_lowercase(),
-                            pricing::format_countdown(switch.time - now)
-                        ),
-                    );
+            self.hits = card.hits.clone();
+            card.destroy();
+
+            if !self.shown {
+                unsafe {
+                    ShowWindow(self.hwnd, SW_SHOWNA);
+                    SetForegroundWindow(self.hwnd);
+                    SetTimer(self.hwnd, TIMER_POPUP, POPUP_MS, None);
                 }
-                add_submenu(menu, "Next switches", switches);
+                self.shown = true;
+            }
+            true
+        }
 
-                let rates = CreatePopupMenu();
-                add_info(rates, "model, input / cached input / output");
-                for model in MODELS {
-                    add_info(rates, model.name);
-                    add_info(rates, &format!("  off   {}", model.off.join(" / ")));
-                    add_info(rates, &format!("  peak  {}", model.peak.join(" / ")));
-                }
-                add_submenu(menu, "Rates per 1M tokens", rates);
+        fn hide_popup(&mut self) {
+            if !self.shown {
+                return;
+            }
+            unsafe {
+                KillTimer(self.hwnd, TIMER_POPUP);
+                ShowWindow(
+                    self.hwnd,
+                    windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE,
+                );
+            }
+            self.shown = false;
+            self.hover = None;
+            self.hits.clear();
+            self.hidden_at_ms = now_ms();
+        }
 
-                AppendMenuW(menu, MF_SEPARATOR, 0, null());
-                add_action(menu, MENU_PRICING, "Open pricing page", false);
-                add_action(menu, MENU_AUTOSTART, "Start with Windows", autostart_enabled());
-                add_action(menu, MENU_NOTIFY, "Notify when prices switch", self.notify);
-                AppendMenuW(menu, MF_SEPARATOR, 0, null());
-                add_action(menu, MENU_EXIT, "Exit", false);
-
-                menu
+        fn toggle_popup(&mut self) {
+            // Clicking the tray icon while the card is open first deactivates
+            // the card (which hides it) and then arrives here; without this
+            // guard the same click would immediately reopen it.
+            if !self.shown && now_ms() - self.hidden_at_ms < 300 {
+                return;
+            }
+            if self.shown {
+                self.hide_popup();
+            } else {
+                self.show_popup(false);
             }
         }
 
-        fn command(&mut self, command: u32) {
-            match command {
-                MENU_PRICING => open_pricing_page(),
-                MENU_AUTOSTART => {
-                    if autostart_enabled() {
-                        set_autostart(&self.exe, false);
+        fn action_at(&self, x: i32, y: i32) -> Option<Action> {
+            self.hits.iter().rev().find_map(|(action, area)| {
+                (x >= area.left && x < area.right && y >= area.top && y < area.bottom)
+                    .then_some(*action)
+            })
+        }
+
+        fn command(&mut self, action: Action) {
+            match action {
+                Action::ZoneLocal | Action::ZoneUtc => {
+                    self.zone = if action == Action::ZoneLocal {
+                        Zone::Local
                     } else {
-                        set_autostart(&self.exe, true);
-                    }
+                        Zone::Utc
+                    };
+                    write_dword("Zone", if self.zone == Zone::Utc { 1 } else { 0 });
+                    self.show_popup(true);
                 }
-                MENU_NOTIFY => self.notify = !self.notify,
-                MENU_EXIT => self.exit(),
-                _ => {}
+                Action::ToggleNotify => {
+                    self.notify = !self.notify;
+                    write_dword("Notify", self.notify as u32);
+                    self.show_popup(true);
+                }
+                Action::ToggleAutostart => {
+                    let enabled = autostart_enabled();
+                    set_autostart(&self.exe, !enabled);
+                    self.show_popup(true);
+                }
+                Action::OpenPricing => {
+                    self.hide_popup();
+                    open_pricing_page();
+                }
+                Action::Quit => self.exit(),
             }
         }
 
@@ -300,79 +403,346 @@ mod win {
             unsafe {
                 Shell_NotifyIconW(NIM_DELETE, &self.nid);
                 self.icon_added = false;
-                KillTimer(self.hwnd, TIMER_ID);
+                KillTimer(self.hwnd, TIMER_REFRESH);
+                KillTimer(self.hwnd, TIMER_POPUP);
                 DestroyWindow(self.hwnd);
             }
         }
     }
 
-    unsafe fn add_info(menu: HMENU, text: &str) {
-        let text = wide(text);
-        AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, text.as_ptr());
-    }
+    // ----------------------------------------------------------------------
+    // Card content
 
-    unsafe fn add_action(menu: HMENU, id: u32, text: &str, checked: bool) {
-        let text = wide(text);
-        let flags = MF_STRING | if checked { MF_CHECKED } else { 0 };
-        AppendMenuW(menu, flags, id as usize, text.as_ptr());
-    }
+    fn build_model(
+        now: i64,
+        zone: Zone,
+        dark: bool,
+        hover: Option<Action>,
+        notify: bool,
+        autostart: bool,
+    ) -> Model {
+        let kind = pricing::kind_at(now);
+        let peak = kind.is_peak();
+        let windows = pricing::window_list(now, 4);
+        let end = windows[0].end;
+        let current = if peak { 1 } else { 0 };
+        let next = 1 - current;
 
-    unsafe fn add_submenu(parent: HMENU, title: &str, submenu: HMENU) {
-        let title = wide(title);
-        AppendMenuW(parent, MF_POPUP, submenu as usize, title.as_ptr());
-    }
+        let zone_caption = match zone {
+            Zone::Utc => "UTC · all windows in UTC".to_string(),
+            Zone::Local => {
+                let offset = local_offset_minutes(now);
+                let sign = if offset < 0 { "\u{2212}" } else { "+" };
+                let offset = offset.abs();
+                let hours = offset / 60;
+                let minutes = offset % 60;
+                if minutes == 0 {
+                    format!("Local time · GMT{sign}{hours}")
+                } else {
+                    format!("Local time · GMT{sign}{hours}:{minutes:02}")
+                }
+            }
+        };
 
-    /// Open the menu at the cursor. The menu is built, shown and destroyed
-    /// within this call so it holds no memory between clicks.
-    fn open_menu() {
-        let built = unsafe { with_app(|app| (app.build_menu(), app.hwnd)) };
-        let Some((menu, hwnd)) = built else { return };
-        if menu.is_null() {
-            return;
+        let rows = windows
+            .iter()
+            .map(|window| {
+                let range = if same_day(window.start, window.end, zone) {
+                    format!("{} – {}", hhmm(window.start, zone), hhmm(window.end, zone))
+                } else {
+                    format!(
+                        "{} – {}",
+                        hhmm(window.start, zone),
+                        day_hhmm(window.end, zone)
+                    )
+                };
+                let meta = if window.current {
+                    format!("{} left", pricing::format_away(window.end - now))
+                } else {
+                    pricing::format_duration(window.end - window.start)
+                };
+                WindowRow {
+                    kind: window.kind,
+                    range,
+                    meta,
+                    current: window.current,
+                }
+            })
+            .collect();
+
+        let rates = MODELS
+            .iter()
+            .map(|model| RateRow {
+                name: model.name.to_string(),
+                amounts: [
+                    model.rates(current)[0].to_string(),
+                    model.rates(current)[1].to_string(),
+                    model.rates(current)[2].to_string(),
+                ],
+            })
+            .collect();
+
+        let next_rates = format!(
+            "From {} · {}: {}",
+            flip_label(end, now, zone),
+            if next == 1 { "peak" } else { "off-peak" },
+            MODELS
+                .iter()
+                .map(|model| {
+                    let rates = model.rates(next);
+                    format!("{} {} / {} / {}", model.name, rates[0], rates[1], rates[2])
+                })
+                .collect::<Vec<_>>()
+                .join(" · ")
+        );
+
+        Model {
+            peak,
+            zone,
+            dark,
+            zone_caption,
+            badge: if peak {
+                "Peak pricing".to_string()
+            } else {
+                "Off-peak · half price".to_string()
+            },
+            countdown: format!("{} left", pricing::format_clock(end - now)),
+            until: format!(
+                "{} starts {}",
+                if peak { "Off-peak" } else { "Peak" },
+                flip_label(end, now, zone)
+            ),
+            segments: pricing::display_segments(
+                now,
+                match zone {
+                    Zone::Utc => 0,
+                    Zone::Local => local_offset_minutes(now),
+                },
+            ),
+            now_minute: minute_of_day(now, zone),
+            windows_caption: match zone {
+                Zone::Utc => "Price windows · UTC".to_string(),
+                Zone::Local => "Price windows · your time".to_string(),
+            },
+            windows: rows,
+            rates_caption: format!("Paying now · {}", if peak { "peak" } else { "off-peak" }),
+            rates_header: "per 1M tokens".to_string(),
+            rates,
+            next_rates,
+            notify,
+            autostart,
+            hover,
         }
+    }
 
-        unsafe {
-            let mut point: POINT = zeroed();
-            GetCursorPos(&mut point);
-            // Without this the menu does not close when clicking elsewhere.
-            SetForegroundWindow(hwnd);
-            let command = TrackPopupMenu(
-                menu,
-                TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN,
-                point.x,
-                point.y,
-                0,
-                hwnd,
-                null(),
-            );
-            PostMessageW(hwnd, WM_NULL, 0, 0);
-            DestroyMenu(menu);
-
-            if command != 0 {
-                with_app(|app| app.command(command as u32));
+    impl ModelRate {
+        fn rates(&self, index: usize) -> &[&'static str; 3] {
+            if index == 1 {
+                &self.peak
+            } else {
+                &self.off
             }
         }
     }
 
-    unsafe extern "system" fn wndproc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    // ----------------------------------------------------------------------
+    // Time and zone labels
+
+    fn local_parts(secs: i64) -> (i64, i64, i64, i64, i64, i64) {
+        let day = secs.div_euclid(86_400);
+        let rest = secs.rem_euclid(86_400);
+        let (year, month, date) = pricing::civil_from_days(day);
+        let utc = SYSTEMTIME {
+            wYear: year as u16,
+            wMonth: month as u16,
+            wDayOfWeek: 0,
+            wDay: date as u16,
+            wHour: (rest / 3_600) as u16,
+            wMinute: (rest % 3_600 / 60) as u16,
+            wSecond: (rest % 60) as u16,
+            wMilliseconds: 0,
+        };
+        let mut local: SYSTEMTIME = unsafe { zeroed() };
+        let converted = unsafe { SystemTimeToTzSpecificLocalTime(null(), &utc, &mut local) };
+        if converted != 0 {
+            (
+                local.wYear as i64,
+                local.wMonth as i64,
+                local.wDay as i64,
+                local.wHour as i64,
+                local.wMinute as i64,
+                local.wSecond as i64,
+            )
+        } else {
+            (
+                year,
+                month,
+                date,
+                rest / 3_600,
+                rest % 3_600 / 60,
+                rest % 60,
+            )
+        }
+    }
+
+    fn parts(secs: i64, zone: Zone) -> (i64, i64, i64, i64, i64) {
+        if zone == Zone::Utc {
+            let day = secs.div_euclid(86_400);
+            let rest = secs.rem_euclid(86_400);
+            let (year, month, date) = pricing::civil_from_days(day);
+            (year, month, date, rest / 3_600, rest % 3_600 / 60)
+        } else {
+            let (year, month, date, hour, minute, _) = local_parts(secs);
+            (year, month, date, hour, minute)
+        }
+    }
+
+    fn local_offset_minutes(secs: i64) -> i64 {
+        let (year, month, date, hour, minute, second) = local_parts(secs);
+        let wall = pricing::days_from_civil(year, month, date) * 86_400
+            + hour * 3_600
+            + minute * 60
+            + second;
+        (wall - secs) / 60
+    }
+
+    fn minute_of_day(secs: i64, zone: Zone) -> f32 {
+        let (_, _, _, hour, minute) = parts(secs, zone);
+        hour as f32 * 60.0 + minute as f32 + (secs.rem_euclid(60)) as f32 / 60.0
+    }
+
+    fn weekday_name((year, month, date, _, _): (i64, i64, i64, i64, i64)) -> &'static str {
+        let index = (pricing::days_from_civil(year, month, date) + 3).rem_euclid(7);
+        pricing::WEEKDAYS[index as usize]
+    }
+
+    fn hhmm(secs: i64, zone: Zone) -> String {
+        let (_, _, _, hour, minute) = parts(secs, zone);
+        format!("{hour:02}:{minute:02}")
+    }
+
+    fn day_hhmm(secs: i64, zone: Zone) -> String {
+        let value = parts(secs, zone);
+        format!("{} {:02}:{:02}", weekday_name(value), value.3, value.4)
+    }
+
+    fn same_day(a: i64, b: i64, zone: Zone) -> bool {
+        let (ay, am, ad, _, _) = parts(a, zone);
+        let (by, bm, bd, _, _) = parts(b, zone);
+        (ay, am, ad) == (by, bm, bd)
+    }
+
+    /// "Sat 04:00" when the flip crosses midnight, plain time otherwise.
+    fn flip_label(secs: i64, from: i64, zone: Zone) -> String {
+        if same_day(secs, from, zone) {
+            hhmm(secs, zone)
+        } else {
+            day_hhmm(secs, zone)
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Window procedure
+
+    unsafe extern "system" fn wndproc(
+        hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
         match message {
             TRAY_MESSAGE => {
-                // The low word carries the mouse message, in the legacy callback
+                // The low word carries the mouse message in the legacy callback
                 // layout used when no icon version was requested.
                 match lparam as u32 & 0xffff {
-                    WM_LBUTTONUP | WM_RBUTTONUP | WM_CONTEXTMENU => open_menu(),
+                    WM_LBUTTONUP | WM_RBUTTONUP | WM_CONTEXTMENU => {
+                        with_app(|app| app.toggle_popup());
+                    }
                     _ => {}
                 }
                 0
             }
             WM_TIMER => {
-                with_app(|app| app.refresh());
+                match wparam {
+                    TIMER_POPUP => {
+                        with_app(|app| {
+                            if app.shown {
+                                app.show_popup(true);
+                            }
+                        });
+                    }
+                    _ => {
+                        with_app(|app| app.refresh_tray());
+                    }
+                }
                 0
             }
-            WM_COMMAND => {
-                let command = (wparam as u32) & 0xffff;
-                with_app(|app| app.command(command));
+            WM_MOUSEMOVE => {
+                let x = (lparam & 0xffff) as i16 as i32;
+                let y = ((lparam >> 16) & 0xffff) as i16 as i32;
+                with_app(|app| {
+                    let hover = app.action_at(x, y);
+                    if hover != app.hover {
+                        app.hover = hover;
+                        app.show_popup(true);
+                    }
+                    let cursor = if hover.is_some() { IDC_HAND } else { IDC_ARROW };
+                    SetCursor(LoadCursorW(null_mut(), cursor));
+                });
+                let mut track = TRACKMOUSEEVENT {
+                    cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+                    dwFlags: windows_sys::Win32::UI::Input::KeyboardAndMouse::TME_LEAVE,
+                    hwndTrack: hwnd,
+                    dwHoverTime: 0,
+                };
+                TrackMouseEvent(&mut track);
                 0
+            }
+            WM_MOUSELEAVE => {
+                with_app(|app| {
+                    if app.hover.is_some() {
+                        app.hover = None;
+                        app.show_popup(true);
+                    }
+                });
+                0
+            }
+            WM_LBUTTONUP => {
+                let x = (lparam & 0xffff) as i16 as i32;
+                let y = ((lparam >> 16) & 0xffff) as i16 as i32;
+                with_app(|app| {
+                    if let Some(action) = app.action_at(x, y) {
+                        app.command(action);
+                    }
+                });
+                0
+            }
+            WM_KEYDOWN => {
+                if wparam == VK_ESCAPE {
+                    with_app(|app| app.hide_popup());
+                    0
+                } else {
+                    DefWindowProcW(hwnd, message, wparam, lparam)
+                }
+            }
+            WM_ACTIVATE => {
+                // The card is a flyout: clicking anywhere else dismisses it.
+                if wparam as u32 & 0xffff == 0 {
+                    with_app(|app| app.hide_popup());
+                }
+                0
+            }
+            WM_SETTINGCHANGE | WM_THEMECHANGED => {
+                with_app(|app| {
+                    let dark = system_is_dark();
+                    if dark != app.dark {
+                        app.dark = dark;
+                        if app.shown {
+                            app.show_popup(true);
+                        }
+                    }
+                });
+                DefWindowProcW(hwnd, message, wparam, lparam)
             }
             WM_ENDSESSION => {
                 // Logging off or shutting down: take the dot with us.
@@ -394,7 +764,7 @@ mod win {
                     // Explorer restarted, so every tray icon was dropped.
                     with_app(|app| {
                         app.icon_added = false;
-                        app.refresh();
+                        app.refresh_tray();
                     });
                     return 0;
                 }
@@ -403,7 +773,41 @@ mod win {
         }
     }
 
+    // ----------------------------------------------------------------------
+    // Startup
+
     pub fn run() {
+        // Per-monitor DPI awareness, so the card is crisp at any scale instead
+        // of being bitmap-stretched by the shell.
+        unsafe {
+            SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+
+        let args: Vec<String> = std::env::args().collect();
+        if let Some(index) = args.iter().position(|arg| arg == "--preview") {
+            let Some(path) = args.get(index + 1) else {
+                eprintln!(
+                    "usage: DeepSeekPriceClock.exe --preview <file.bmp> \
+                     [unix-seconds] [scale] [local|utc]"
+                );
+                return;
+            };
+            let now = args
+                .get(index + 2)
+                .and_then(|value| value.parse::<i64>().ok())
+                .unwrap_or_else(now_secs);
+            let scale = args
+                .get(index + 3)
+                .and_then(|value| value.parse::<f32>().ok())
+                .unwrap_or(1.0);
+            let zone = match args.get(index + 4).map(String::as_str) {
+                Some("utc") => Zone::Utc,
+                _ => Zone::Local,
+            };
+            preview(path, now, scale, zone);
+            return;
+        }
+
         unsafe {
             let mutex_name = wide(MUTEX_NAME);
             let mutex = CreateMutexW(null(), 0, mutex_name.as_ptr());
@@ -437,14 +841,14 @@ mod win {
 
             let title = wide(APP_NAME);
             let hwnd = CreateWindowExW(
-                0,
+                WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
                 class_name.as_ptr(),
                 title.as_ptr(),
-                WS_OVERLAPPED,
+                WS_POPUP,
                 0,
                 0,
-                0,
-                0,
+                1,
+                1,
                 null_mut(),
                 null_mut(),
                 instance,
@@ -456,8 +860,8 @@ mod win {
             }
 
             *APP.0.get() = Some(App::new(hwnd));
-            with_app(|app| app.refresh());
-            SetTimer(hwnd, TIMER_ID, REFRESH_MS, None);
+            with_app(|app| app.refresh_tray());
+            SetTimer(hwnd, TIMER_REFRESH, REFRESH_MS, None);
 
             let mut msg: MSG = zeroed();
             // GetMessageW returns 0 on WM_QUIT and -1 on error; either ends the loop.
@@ -479,24 +883,168 @@ mod win {
         }
     }
 
-    fn open_pricing_page() {
-        unsafe {
-            let verb = wide("open");
-            let url = wide(PRICING_URL);
-            ShellExecuteW(
-                null_mut(),
-                verb.as_ptr(),
-                url.as_ptr(),
-                null(),
-                null(),
-                windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
-            );
+    /// Render the card to BMP files without a window, for screenshots and for
+    /// checking the layout on a machine that is not running Windows.
+    fn preview(path: &str, now: i64, scale: f32, zone: Zone) {
+        for dark in [true, false] {
+            let model = build_model(now, zone, dark, None, true, false);
+            let Some(card) = paint::render(&model, scale) else {
+                eprintln!("could not render the card");
+                return;
+            };
+            let file = if dark {
+                path.to_string()
+            } else if let Some(stem) = path.strip_suffix(".bmp") {
+                format!("{stem}-light.bmp")
+            } else {
+                format!("{path}-light.bmp")
+            };
+            if card.save_bmp(&file) {
+                println!("wrote {file}");
+            } else {
+                eprintln!("could not write {file}");
+            }
+            card.destroy();
         }
     }
 
-    // --- Autostart ---------------------------------------------------------
-    // A per-user Run value, so no shortcut, no admin rights and nothing
-    // outside HKEY_CURRENT_USER.
+    // ----------------------------------------------------------------------
+    // Placement and DPI
+
+    /// Put the card above the pointer, right edges roughly aligned like a tray
+    /// flyout, and keep it inside the monitor's work area.
+    fn place_card(card: &Card) -> (i32, i32) {
+        unsafe {
+            let mut point: POINT = zeroed();
+            GetCursorPos(&mut point);
+            let monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+            let mut info: MONITORINFO = zeroed();
+            info.cbSize = size_of::<MONITORINFO>() as u32;
+            let work = if GetMonitorInfoW(monitor, &mut info) != 0 {
+                info.rcWork
+            } else {
+                RECT {
+                    left: 0,
+                    top: 0,
+                    right: 1920,
+                    bottom: 1040,
+                }
+            };
+
+            let card_w = card.card_w;
+            let card_h = card.card_h;
+
+            let mut left = point.x + 10 - card_w;
+            let mut top = point.y - 10 - card_h;
+            if top < work.top + 4 {
+                top = point.y + 18;
+            }
+            left = left.clamp(work.left + 4, (work.right - card_w - 4).max(work.left + 4));
+            top = top.clamp(work.top + 4, (work.bottom - card_h - 4).max(work.top + 4));
+            (left, top)
+        }
+    }
+
+    fn dpi_scale_at_cursor() -> f32 {
+        unsafe {
+            let mut point: POINT = zeroed();
+            GetCursorPos(&mut point);
+            let monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+            let mut dpi_x = 96u32;
+            let mut dpi_y = 96u32;
+            if GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) != 0 {
+                dpi_x = GetDpiForSystem();
+            }
+            if dpi_x == 0 {
+                dpi_x = 96;
+            }
+            (dpi_x as f32 / 96.0).clamp(0.75, 4.0)
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Settings and autostart
+
+    fn reg_read(name: &str, flag: u32) -> Option<Vec<u8>> {
+        unsafe {
+            let key = wide(SETTINGS_KEY);
+            let value = wide(name);
+            let mut size: u32 = 4;
+            let mut data = vec![0u8; size as usize];
+            let status = RegGetValueW(
+                HKEY_CURRENT_USER,
+                key.as_ptr(),
+                value.as_ptr(),
+                flag,
+                null_mut(),
+                data.as_mut_ptr() as *mut c_void,
+                &mut size,
+            );
+            if status != ERROR_SUCCESS {
+                return None;
+            }
+            data.truncate(size as usize);
+            Some(data)
+        }
+    }
+
+    fn read_dword(name: &str) -> Option<u32> {
+        let data = reg_read(name, RRF_RT_REG_DWORD)?;
+        (data.len() >= 4).then(|| u32::from_le_bytes([data[0], data[1], data[2], data[3]]))
+    }
+
+    fn write_dword(name: &str, value: u32) {
+        unsafe {
+            let key_name = wide(SETTINGS_KEY);
+            let mut key = null_mut();
+            if RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                key_name.as_ptr(),
+                0,
+                null(),
+                0,
+                KEY_SET_VALUE,
+                null_mut(),
+                &mut key,
+                null_mut(),
+            ) != ERROR_SUCCESS
+            {
+                return;
+            }
+            let value_name = wide(name);
+            let data = value.to_le_bytes();
+            RegSetValueExW(
+                key,
+                value_name.as_ptr(),
+                0,
+                REG_DWORD,
+                data.as_ptr(),
+                data.len() as u32,
+            );
+            RegCloseKey(key);
+        }
+    }
+
+    fn system_is_dark() -> bool {
+        unsafe {
+            let key = wide(THEME_KEY);
+            let value = wide("AppsUseLightTheme");
+            let mut data: u32 = 1;
+            let mut size: u32 = 4;
+            let status = RegGetValueW(
+                HKEY_CURRENT_USER,
+                key.as_ptr(),
+                value.as_ptr(),
+                RRF_RT_REG_DWORD,
+                null_mut(),
+                &mut data as *mut u32 as *mut c_void,
+                &mut size,
+            );
+            // Windows always sets this; if it is missing, prefer the dark card,
+            // which is the one the GNOME extension's screenshots show.
+            status != ERROR_SUCCESS || data == 0
+        }
+    }
 
     fn autostart_enabled() -> bool {
         unsafe {
@@ -516,7 +1064,14 @@ mod win {
         unsafe {
             let key_name = wide(RUN_KEY);
             let mut key = null_mut();
-            if RegOpenKeyExW(HKEY_CURRENT_USER, key_name.as_ptr(), 0, KEY_SET_VALUE, &mut key) != ERROR_SUCCESS {
+            if RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                key_name.as_ptr(),
+                0,
+                KEY_SET_VALUE,
+                &mut key,
+            ) != ERROR_SUCCESS
+            {
                 return false;
             }
             let value_name = wide(RUN_VALUE);
@@ -538,13 +1093,31 @@ mod win {
         }
     }
 
+    fn open_pricing_page() {
+        unsafe {
+            let verb = wide("open");
+            let url = wide(PRICING_URL);
+            ShellExecuteW(
+                null_mut(),
+                verb.as_ptr(),
+                url.as_ptr(),
+                null(),
+                null(),
+                windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+            );
+        }
+    }
+
     fn current_exe() -> String {
         let mut buffer = [0u16; 32_768];
-        let length = unsafe { GetModuleFileNameW(null_mut(), buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
+        let length =
+            unsafe { GetModuleFileNameW(null_mut(), buffer.as_mut_ptr(), buffer.len() as u32) }
+                as usize;
         String::from_utf16_lossy(&buffer[..length])
     }
 
-    // --- Drawing -----------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // Drawing the tray icon
 
     /// A 32 px dot: a soft halo with the solid dot on top, both in one colour.
     /// Drawn by supersampling in code so the binary carries no image assets and
@@ -582,12 +1155,14 @@ mod win {
             };
 
             let mut bits: *mut c_void = null_mut();
-            let colour: HBITMAP = CreateDIBSection(null_mut(), &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+            let colour: windows_sys::Win32::Graphics::Gdi::HBITMAP =
+                CreateDIBSection(null_mut(), &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
             if colour.is_null() || bits.is_null() {
                 return null_mut();
             }
 
-            let pixels = std::slice::from_raw_parts_mut(bits as *mut u8, (SIZE * SIZE * 4) as usize);
+            let pixels =
+                std::slice::from_raw_parts_mut(bits as *mut u8, (SIZE * SIZE * 4) as usize);
             let samples = (SAMPLES * SAMPLES) as f64;
             for y in 0..SIZE {
                 for x in 0..SIZE {
@@ -646,7 +1221,8 @@ mod win {
         }
     }
 
-    // --- Small helpers -----------------------------------------------------
+    // ----------------------------------------------------------------------
+    // Small helpers
 
     fn now_secs() -> i64 {
         SystemTime::now()
@@ -655,28 +1231,11 @@ mod win {
             .unwrap_or(0)
     }
 
-    /// HH:MM in the user's time zone for a UTC instant.
-    fn local_hhmm(secs: i64) -> String {
-        let day = secs.div_euclid(86_400);
-        let rest = secs.rem_euclid(86_400);
-        let (year, month, date) = pricing::civil_from_days(day);
-        let utc = SYSTEMTIME {
-            wYear: year as u16,
-            wMonth: month as u16,
-            wDayOfWeek: 0,
-            wDay: date as u16,
-            wHour: (rest / 3_600) as u16,
-            wMinute: (rest % 3_600 / 60) as u16,
-            wSecond: (rest % 60) as u16,
-            wMilliseconds: 0,
-        };
-        let mut local: SYSTEMTIME = unsafe { zeroed() };
-        let converted = unsafe { SystemTimeToTzSpecificLocalTime(null(), &utc, &mut local) };
-        if converted != 0 {
-            format!("{:02}:{:02}", local.wHour, local.wMinute)
-        } else {
-            format!("{:02}:{:02}", utc.wHour, utc.wMinute)
-        }
+    fn now_ms() -> i64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis() as i64)
+            .unwrap_or(0)
     }
 
     /// NUL-terminated UTF-16 for the wide Win32 calls.
